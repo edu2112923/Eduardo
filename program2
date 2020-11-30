@@ -1,0 +1,210 @@
+c     ------------------------------------------------------------------
+c        RELATIVE DEPTH-DOSES, BETA-POINT DOSE FUNCTION INTEGRATION
+c           SPHERICAL AND ASYMMETRIC Ru-106 COB MODEL APPLICATOR
+c     ------------------------------------------------------------------
+      PROGRAM ASYMMETRIC_PLAQUE
+      IMPLICIT NONE
+      REAL*8 pi, e, Radius, diameter, phi_max, a_S, rho, nu, c, f
+      REAL*8 E_beta, r0, h, xzero, x2
+      REAL*8 x_coord_0, y_coord_0, Y_cut_out_pos_0, Y_cut_out_neg_0
+      REAL*8 x_coord, y_coord, Y_cut_out_pos, Y_cut_out_neg
+      Real*8 a_x, b_x, a_y, b_y, h_x, h_y, X, Y
+      REAL*8 x_0, y_0, z_0, x0, y0, z0
+      REAL*8 SOMA_0, SOMA, Funcao, Ref_Dose, Relative_Dose
+      REAL*8 alpha, B1, CSI, factor, G
+      INTEGER Iz0, I_0, J_0, I, J, N
+      DIMENSION X(0:5000), Y(0:5000), CSI(0:5000,0:5000)
+      DIMENSION factor(0:5000,0:5000)
+      DIMENSION G(0:5000,0:5000), Funcao(0:5000,0:5000)
+      OPEN(1, File = 'COB.txt')
+
+      WRITE (1,5)
+5     FORMAT ('depth[cm]  Relative Dose Rate')
+      WRITE (1,10)
+10    FORMAT ('------------------------------')
+c     ------------------------------------------------------------------
+c     CONSTANTS:
+
+       pi = acos(-1.d0) ; e = exp(1.d0)
+       Radius = 1.20d0; diameter = 1.71d0; ! Radius of curvature and diameter of the COB plaque, in cm.
+       phi_max = asin(diameter/(2.d0*Radius))
+       a_S = 10.d0 ! Activity/Source_Area, in MBq/cm2. Here this value does not matter, since we are interested in the relative dose rates!
+       rho = 1.0d0 ! in g/cm3
+       nu = 3.57d0 ! in cm2/g
+       c = 0.88d0; f = 5.07d0 ! Dimensionless parameters.
+       E_beta = 1.42d0 !
+       r0 = 0.35d0; h = 0.60d0 ! in cm
+       x2 = diameter/2.d0 - h; xzero = x2 + r0
+c     ------------------------------------------------------------------
+       alpha = 1.d0/(3.d0*c*c-(c*c - 1.d0)*e + (3.d0 + f)*exp(1.d0 -f) -
+     +                                          4.d0*exp(1.d0 - f/2.d0))
+       B1 = 0.046d0 * (rho**2.d0) * (nu**3.d0) * E_beta * alpha
+
+          N = 1200
+          a_x = 0.d0  ;  b_x = phi_max ;  h_x = (b_x - a_x) / N ! phi
+          a_y = 0.d0*pi  ;  b_y = 2.d0*pi ;  h_y = (b_y - a_y) / N ! theta
+	  X(0) = a_x  ; Y(0) = a_y
+	  
+c     a_x, b_x and a_y, b_y are the limits of integration, N is the number of intervals.
+
+c     ------------------------------------------------------------------
+c      DOSE RATE AT THE REFERENCE POINT
+
+        z_0 = Radius - 0.10d0 ! reference depth [in cm] from the source center.
+        x_0 = 0.0d0 ! the x coordinate of point, in cm
+        y_0 = 0.0d0 ! the y coordinate of point, in cm
+
+        SOMA_0 = 0.d0
+        DO I_0 = 0, N, 1
+         DO J_0 = 0, N, 1
+          X(I_0+1) = X(I_0) + h_x ! phi
+          Y(J_0+1) = Y(J_0) + h_y ! theta
+c     ------------------------------------------------------------------
+c     THE EXCLUSION OF THE POINTS INSIDE THE CUT-OUT SECTION:
+
+          x_coord_0 = Radius*sin(X(I_0))*cos(Y(J_0))
+          y_coord_0 = Radius*sin(X(I_0))*sin(Y(J_0))
+
+      Y_cut_out_pos_0 =  sqrt(r0**2.d0-(x_coord_0 - xzero)**2.d0)
+      Y_cut_out_neg_0 = -sqrt(r0**2.d0-(x_coord_0 - xzero)**2.d0)
+      
+      IF((x_coord_0.GT.x2).AND.(x_coord_0.LT.xzero).AND.
+     + (y_coord_0.GE.0.d0).AND.(y_coord_0.LT.Y_cut_out_pos_0)) CYCLE
+
+      IF((x_coord_0.GT.x2).AND.(x_coord_0.LT.xzero).AND.
+     + (y_coord_0.LT.0.d0).AND.(y_coord_0.GT.Y_cut_out_neg_0)) CYCLE
+
+      IF ((x_coord_0.GE.xzero).AND.(y_coord_0.LT.r0)
+     + .AND.(y_coord_0.GT.-r0)) CYCLE
+
+c     ------------------------------------------------------------------
+       CSI(I_0,J_0) = sqrt(Radius*Radius + x_0*x_0 + y_0*y_0 + z_0*z_0 -
+     +    2.d0*Radius*sin(X(I_0))*(x_0*cos(Y(J_0)) + y_0*sin(Y(J_0))) -
+     +                                      2.d0*Radius*z_0*cos(X(I_0)))
+
+          factor(I_0,J_0) = rho*nu*CSI(I_0,J_0)
+
+          G(I_0,J_0) = c - factor(I_0,J_0)*exp(1.d0 - factor(I_0,J_0)/c)
+           IF (factor(I_0,J_0).GE.c) G(I_0,J_0) = 0.d0
+
+         Funcao(I_0,J_0) = ((B1/(factor(I_0,J_0)**2.d0)) * (G(I_0,J_0) +
+     +  factor(I_0,J_0) * exp(1.d0 - factor(I_0,J_0)) - factor(I_0,J_0)*
+     +         exp(1.d0 - factor(I_0,J_0)/2.d0 - f/2.d0))) * sin(X(I_0))
+
+           IF (factor(I_0,J_0).GE.f) Funcao(I_0,J_0) = 0.d0
+
+           IF ((I_0.EQ.0).AND.(J_0.EQ.0)) GOTO 31
+           IF ((I_0.EQ.0).AND.(J_0.EQ.N)) GOTO 31
+           IF ((I_0.EQ.N).AND.(J_0.EQ.0)) GOTO 31
+           IF ((I_0.EQ.N).AND.(J_0.EQ.N)) GOTO 31
+
+           IF ((I_0.EQ.0).AND.(J_0.NE.0)) GOTO 41
+           IF ((I_0.EQ.0).AND.(J_0.NE.N)) GOTO 41
+           IF ((I_0.EQ.N).AND.(J_0.NE.0)) GOTO 41
+           IF ((I_0.EQ.N).AND.(J_0.NE.N)) GOTO 41
+           IF ((I_0.NE.0).AND.(J_0.EQ.0)) GOTO 41
+           IF ((I_0.NE.0).AND.(J_0.EQ.N)) GOTO 41
+           IF ((I_0.NE.N).AND.(J_0.EQ.0)) GOTO 41
+           IF ((I_0.NE.N).AND.(J_0.EQ.N)) GOTO 41
+c     ------------------------------------------------------------------
+c      Funcao(I_0,J_0) is the function to be integrated.
+c     ------------------------------------------------------------------
+        Funcao(I_0,J_0) = 1.00d0 * Funcao(I_0,J_0)
+          GOTO 51
+31      Funcao(I_0,J_0) = 0.25d0 * Funcao(I_0,J_0)
+          GOTO 51
+41      Funcao(I_0,J_0) = 0.50d0 * Funcao(I_0,J_0)
+51        Continue
+
+         SOMA_0 = SOMA_0 + Funcao(I_0,J_0)
+
+         END DO ! J_0
+        END DO ! I_0
+
+         Ref_Dose = a_S * (Radius**2.d0) * SOMA_0 * h_x * h_y
+c     ------------------------------------------------------------------
+c     ------------------------------------------------------------------
+c     DOSE RATE ALONG CENTRAL AXIS
+
+       x0 = 0.0d0 ! x coordinate of point, in cm
+       y0 = 0.0d0 ! y coordinate of point, in cm
+       DO Iz0 = 0, int(Radius*100.d0), 5
+       z0 = Iz0/100.d0 ! ! z coordinate of point, in cm. Depths increase from the source center
+
+        SOMA = 0.d0
+        DO I = 0, N, 1
+         DO J = 0, N, 1
+          X(I+1) = X(I) + h_x ! phi
+          Y(J+1) = Y(J) + h_y ! theta
+c     ------------------------------------------------------------------
+c     THE EXCLUSION OF THE POINTS INSIDE THE CUT-OUT SECTION:
+
+          x_coord = Radius*sin(X(I))*cos(Y(J))
+          y_coord = Radius*sin(X(I))*sin(Y(J))
+
+      Y_cut_out_pos =  sqrt(r0**2.d0 - (x_coord - xzero)**2.d0)
+      Y_cut_out_neg = -sqrt(r0**2.d0 - (x_coord - xzero)**2.d0)
+
+      IF((x_coord.GT.x2).AND.(x_coord.LT.xzero).AND.(y_coord.GE.0.d0)
+     + .AND.(y_coord.LT.Y_cut_out_pos)) CYCLE
+
+      IF((x_coord.GT.x2).AND.(x_coord.LT.xzero).AND.(y_coord.LT.0.d0)
+     + .AND.(y_coord.GT.Y_cut_out_neg)) CYCLE
+
+      IF((x_coord.GE.xzero).AND.(y_coord.LT.r0)
+     + .AND.(y_coord.GT.-r0)) CYCLE
+
+c     ------------------------------------------------------------------
+       CSI(I,J) = sqrt(Radius*Radius + x0*x0 + y0*y0 + z0*z0  -
+     +    2.d0*Radius*sin(X(I))*(x0*cos(Y(J)) + y0*sin(Y(J))) -
+     +                                         2.d0*Radius*z0*cos(X(I)))
+
+          factor(I,J) = rho*nu*CSI(I,J)
+
+          G(I,J) = c - factor(I,J)*exp(1.d0 - factor(I,J)/c)
+           IF (factor(I,J).GE.c) G(I,J) = 0.d0
+
+         Funcao(I,J) = ((B1/(factor(I,J)**2.d0))* (G(I,J) + factor(I,J)*
+     +                           exp(1.d0 - factor(I,J)) - factor(I,J) *
+     +                 exp(1.d0 - factor(I,J)/2.d0 - f/2.d0)))*sin(X(I))
+
+           IF (factor(I,J).GE.f) Funcao(I,J) = 0.d0
+
+           IF ((I.EQ.0).AND.(J.EQ.0)) GOTO 30
+           IF ((I.EQ.0).AND.(J.EQ.N)) GOTO 30
+           IF ((I.EQ.N).AND.(J.EQ.0)) GOTO 30
+           IF ((I.EQ.N).AND.(J.EQ.N)) GOTO 30
+
+           IF ((I.EQ.0).AND.(J.NE.0)) GOTO 40
+           IF ((I.EQ.0).AND.(J.NE.N)) GOTO 40
+           IF ((I.EQ.N).AND.(J.NE.0)) GOTO 40
+           IF ((I.EQ.N).AND.(J.NE.N)) GOTO 40
+           IF ((I.NE.0).AND.(J.EQ.0)) GOTO 40
+           IF ((I.NE.0).AND.(J.EQ.N)) GOTO 40
+           IF ((I.NE.N).AND.(J.EQ.0)) GOTO 40
+           IF ((I.NE.N).AND.(J.EQ.N)) GOTO 40
+c     ------------------------------------------------------------------
+c      Funcao(I_0,J_0) is the function to be integrated.
+c     ------------------------------------------------------------------
+      Funcao(I,J) = 1.00d0 * Funcao(I,J)
+          GOTO 50
+30    Funcao(I,J) = 0.25d0 * Funcao(I,J)
+          GOTO 50
+40    Funcao(I,J) = 0.50d0 * Funcao(I,J)
+50        Continue
+
+         SOMA = SOMA + Funcao(I,J)
+
+         END DO ! J
+        END DO ! I
+        
+      Relative_Dose = a_S * (Radius**2.d0) * SOMA * h_x * h_y / Ref_Dose
+
+      WRITE(1,60) Radius - z0, Relative_Dose
+
+c     depth = Radius - z0
+
+60    FORMAT (F4.2,8x,F7.5)
+       END DO ! Iz0
+       
+      END PROGRAM ASYMMETRIC_PLAQUE
